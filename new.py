@@ -1,0 +1,523 @@
+import os
+import sys
+import ctypes
+import requests
+import subprocess
+import time
+import datetime
+import traceback
+import threading
+import msvcrt
+import json
+import urllib3
+from urllib.parse import unquote, urlparse
+
+# Установка титула командной строки
+if os.name == 'nt':
+    ctypes.windll.kernel32.SetConsoleTitleW("NewZapret | 1.1 | Название обхода: Ожидание... | by Realiz_")
+
+# Отключение предупреждений о неверифицированных SSL-сертификатах
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# ================================================
+# КОНФИГУРАЦИЯ СИСТЕМЫ
+# ================================================
+REPO_URL = "https://github.com/bol-van/zapret-win-bundle"
+REPO_RAW_URL = "https://raw.githubusercontent.com/bol-van/zapret-win-bundle/master"
+
+BIN_FILES = {
+    "WinDivert.dll": f"{REPO_RAW_URL}/zapret-winws/WinDivert.dll",
+    "WinDivert64.sys": f"{REPO_RAW_URL}/zapret-winws/WinDivert64.sys",
+    "cygwin1.dll": f"{REPO_RAW_URL}/zapret-winws/cygwin1.dll",
+    "winws.exe": f"{REPO_RAW_URL}/zapret-winws/winws.exe",
+    "quic_initial_www_google_com.bin": f"{REPO_RAW_URL}/zapret-winws/files/quic_initial_www_google_com.bin",
+    "tls_clienthello_www_google_com.bin": "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/bin/tls_clienthello_www_google_com.bin"
+}
+
+LIST_FILES = {
+    "ipset-all.txt": "https://raw.githubusercontent.com/Realiz-R/NewZapret/main/lists/ipset-all.txt",
+    "list-general.txt": "https://raw.githubusercontent.com/Realiz-R/NewZapret/main/lists/list-general.txt",
+    "scenarios.json": "https://raw.githubusercontent.com/Realiz-R/NewZapret/main/lists/scenarios.json"
+}
+
+REQUIRED_FILES = list(BIN_FILES.keys()) + list(LIST_FILES.keys())
+LOG_FILE = "logs/log.txt"
+TEST_URLS = [
+    "https://discord.com",
+    "https://youtube.com",
+    "https://cloudflare-ech.com"
+]
+TEST_TIMEOUT = 10
+TEST_ITERATIONS = 2
+
+# ================================================
+# СИСТЕМНЫЕ УТИЛИТЫ
+# ================================================
+def setup_logging():
+    os.makedirs("logs", exist_ok=True)
+    with open(LOG_FILE, "w", encoding="utf-8") as f:
+        f.write(f"=== NewZapret log v1.1 - {datetime.datetime.now()} ===\n")
+
+def update_window_title(scenario_name=None):
+    title = f"NewZapret | 1.1 | Название обхода: {scenario_name if scenario_name else 'Ожидание...'} | by Realiz_"
+    if os.name == 'nt':
+        ctypes.windll.kernel32.SetConsoleTitleW(title)
+
+def log_error(message, exception=None):
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(f"\n[ОШИБКА] {datetime.datetime.now()}\n")
+        f.write(f"Сообщение: {message}\n")
+        if exception:
+            f.write(f"Тип ошибки: {type(exception).__name__}\n")
+            f.write(f"Подробности: {str(exception)}\n")
+        f.write("-"*50 + "\n")
+
+def is_admin():
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except Exception as e:
+        log_error("Ошибка проверки прав администратора", e)
+        return False
+
+def run_as_admin():
+    try:
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
+        sys.exit()
+    except Exception as e:
+        log_error("Ошибка запроса прав администратора", e)
+        print("Не удалось запросить права администратора")
+        time.sleep(2)
+        sys.exit(1)
+
+def clear_screen():
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def print_banner():
+    clear_screen()
+    banner = r"""
+█▄░█ █▀▀ █░█░█ ▀█ ▄▀█ █▀█ █▀█ █▀▀ ▀█▀
+█░▀█ ██▄ ▀▄▀▄▀ █▄ █▀█ █▀▀ █▀▄ ██▄ ░█░
+
+АВТОМАТИЧЕСКИЙ ОБХОД DPI | ВЕРСИЯ 1.1 | by Realiz_
+"""
+    print(banner)
+    print(f"{'='*60}\n")
+
+def load_scenarios():
+    scenarios_file = os.path.join("lists", "scenarios.json")
+    if not os.path.exists(scenarios_file):
+        return None
+    
+    try:
+        with open(scenarios_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        log_error("Ошибка загрузки сценариев", e)
+        return None
+
+# ================================================
+# УЛУЧШЕННАЯ ЗАГРУЗКА ФАЙЛОВ
+# ================================================
+def download_file(url, dest_path):
+    try:
+        temp_path = dest_path + ".tmp"
+        response = requests.get(url, stream=True, timeout=15, verify=False)
+        response.raise_for_status()
+        
+        file_exists = os.path.exists(dest_path)
+        if file_exists:
+            try:
+                existing_size = os.path.getsize(dest_path)
+            except OSError:
+                existing_size = 0
+        else:
+            existing_size = 0
+            
+        new_size = int(response.headers.get('content-length', 0))
+        
+        if file_exists and existing_size == new_size:
+            print(f"  ✓ Актуальная версия ({new_size//1024} КБ)")
+            return True
+        
+        with open(temp_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        
+        if file_exists:
+            os.remove(dest_path)
+        os.rename(temp_path, dest_path)
+        
+        if file_exists:
+            print(f"  ✓ Обновлен ({new_size//1024} КБ)")
+        else:
+            print(f"  ✓ Загружен ({new_size//1024} КБ)")
+        
+        return True
+        
+    except Exception as e:
+        log_error(f"Ошибка загрузки файла {os.path.basename(dest_path)}", e)
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+        return False
+
+def download_newzapret_files():
+    print("[1/3] Автоматическое обновление компонентов\n")
+    
+    os.makedirs("bin", exist_ok=True)
+    os.makedirs("lists", exist_ok=True)
+    
+    success_count = 0
+    total_files = len(REQUIRED_FILES)
+    
+    # Сначала загружаем бинарные файлы
+    for i, filename in enumerate(REQUIRED_FILES[:len(BIN_FILES)], 1):
+        dest_path = os.path.join("bin", filename)
+        raw_url = BIN_FILES[filename]
+        
+        print(f"[{i}/{total_files}] Обработка {filename}...", end=' ')
+        
+        if download_file(raw_url, dest_path):
+            success_count += 1
+    
+    # Затем загружаем файлы списков
+    for i, filename in enumerate(REQUIRED_FILES[len(BIN_FILES):], len(BIN_FILES) + 1):
+        dest_path = os.path.join("lists", filename)
+        raw_url = LIST_FILES[filename]
+        
+        print(f"[{i}/{total_files}] Обработка {filename}...", end=' ')
+        
+        if download_file(raw_url, dest_path):
+            success_count += 1
+    
+    if success_count == total_files:
+        return True
+    else:
+        log_error(f"Обновлено {success_count}/{total_files} файлов")
+        return False
+
+# ================================================
+# ОПТИМИЗАЦИЯ СЕТЕВЫХ ПАРАМЕТРОВ
+# ================================================
+def optimize_network():
+    print("\n[2/3] Оптимизация сетевых параметров\n")
+    
+    optimizations = [
+        ("Настройка автонастройки TCP", 'netsh int tcp set global autotuninglevel=experimental'),
+        ("Активация масштабирования окна TCP", 'netsh int tcp set global rss=enabled'),
+        ("Включение кэширующей обработки", 'netsh int tcp set global chimney=enabled'),
+        ("Активация аппаратного ускорения", 'netsh int tcp set global dca=enabled'),
+        ("Оптимизация ECN", 'netsh int tcp set global ecncapability=enabled'),
+        ("Настройка обработки перегрузок", 'netsh int tcp set global congestionprovider=ctcp'),
+        ("Оптимизация размера TCP-окна", 'netsh int tcp set global initialRto=1000'),
+    ]
+    
+    success_count = 0
+    
+    for desc, cmd in optimizations:
+        print(f"{desc}...", end=' ')
+        try:
+            result = subprocess.run(
+                cmd, 
+                shell=True, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                print("Успешно")
+                success_count += 1
+            else:
+                print("Не поддерживается")
+                log_error(f"Оптимизация не поддерживается: {desc}")
+        except Exception as e:
+            print("Ошибка выполнения")
+            log_error(f"Ошибка выполнения оптимизации: {desc}", e)
+    
+    return success_count >= 4
+
+# ================================================
+# ТЕСТИРОВАНИЕ СЦЕНАРИЕВ
+# ================================================
+def test_scenario(scenario):
+    bin_path = os.path.join("bin", "")
+    lists_path = os.path.join("lists", "")
+    
+    args = ["bin\\winws.exe"]
+    for arg in scenario['args']:
+        formatted_arg = arg.format(
+            BIN=bin_path,
+            LISTS=lists_path,
+            GAME_FILTER="0"
+        )
+        args.append(formatted_arg)
+    
+    process = subprocess.Popen(
+        args,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        cwd=os.getcwd()
+    )
+    
+    time.sleep(3)
+    
+    results = []
+    session = requests.Session()
+    session.verify = False
+    
+    try:
+        for url in TEST_URLS:
+            url_times = []
+            for _ in range(TEST_ITERATIONS):
+                try:
+                    start_time = time.time()
+                    response = session.head(url, timeout=TEST_TIMEOUT, allow_redirects=True)
+                    response.raise_for_status()
+                    elapsed = time.time() - start_time
+                    url_times.append(elapsed)
+                except Exception as e:
+                    url_times.append(TEST_TIMEOUT)
+                    log_error(f"Ошибка теста {url} для сценария {scenario['name']}", e)
+            
+            results.append(min(url_times))
+    
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+    
+    return sum(results) / len(results) if results else TEST_TIMEOUT
+
+def auto_select_scenario():
+    scenarios = load_scenarios()
+    if not scenarios:
+        print("Не удалось загрузить сценарии. Использую встроенные.")
+        return None
+    
+    print("\n[3/3] Автоматическое тестирование сценариев\n")
+    print(f"Будет протестировано {len(scenarios)} сценариев на {len(TEST_URLS)} сайтах...")
+    print("Это займет несколько минут. Пожалуйста, подождите.\n")
+    
+    results = []
+    
+    for scenario in scenarios:
+        try:
+            print(f"Тестирование: {scenario['name']}...")
+            avg_time = test_scenario(scenario)
+            results.append((scenario, avg_time))
+            print(f"  ✓ Среднее время: {avg_time:.2f} сек")
+        except Exception as e:
+            log_error(f"Ошибка тестирования сценария {scenario['name']}", e)
+            results.append((scenario, TEST_TIMEOUT * 2))
+    
+    results.sort(key=lambda x: x[1])
+    
+    with open("logs/test_results.json", "w", encoding="utf-8") as f:
+        json.dump([
+            {"scenario": s["name"], "time": t} 
+            for s, t in results
+        ], f, indent=2, ensure_ascii=False)
+    
+    print("\nТоп-3 сценариев по скорости:")
+    for i, (scenario, avg_time) in enumerate(results[:3]):
+        print(f"{i+1}. {scenario['name']}: {avg_time:.2f} сек")
+    
+    return results[0][0]
+
+def select_scenario():
+    scenarios = load_scenarios()
+    if not scenarios:
+        print("Не удалось загрузить сценарии. Использую встроенные.")
+        return None
+    
+    print("\n[3/3] Выбор сценария обхода\n")
+    print("Доступные сценарии:")
+    
+    for scenario in scenarios:
+        print(f"\n{scenario['id']}. {scenario['name']}")
+        print(f"   {scenario['description']}")
+    
+    print("\n" + "="*60)
+    
+    while True:
+        try:
+            choice = int(input("\nВведите номер сценария: "))
+            for scenario in scenarios:
+                if scenario['id'] == choice:
+                    return scenario
+            print("Неверный номер сценария. Попробуйте снова.")
+        except ValueError:
+            print("Пожалуйста, введите число.")
+
+# ================================================
+# ЗАПУСК СИСТЕМЫ
+# ================================================
+def kill_existing_process():
+    try:
+        result = subprocess.run(
+            'tasklist /FI "IMAGENAME eq winws.exe"',
+            shell=True,
+            capture_output=True,
+            text=True,
+            encoding='cp866',
+            errors='ignore'
+        )
+        
+        if "winws.exe" in result.stdout:
+            print("Обнаружен работающий процесс, завершаю...")
+            subprocess.run('taskkill /F /IM winws.exe', shell=True, check=True)
+            time.sleep(1)
+            return True
+        return False
+    except Exception as e:
+        log_error("Ошибка завершения процесса", e)
+        return False
+
+def run_newzapret(scenario):
+    if not scenario:
+        print("Ошибка: сценарий не выбран")
+        return False
+        
+    print(f"\nЗапускаю сценарий: {scenario['name']}\n")
+    update_window_title(scenario['name'])
+    
+    missing = []
+    for filename in REQUIRED_FILES:
+        if not os.path.exists(os.path.join("bin" if filename in BIN_FILES else "lists", filename)):
+            missing.append(filename)
+    
+    if scenario.get('requires_tls', False):
+        tls_file = os.path.join("bin", "tls_clienthello_www_google_com.bin")
+        if not os.path.exists(tls_file):
+            print(f"\n  ⚠ Внимание! Для этого сценария требуется файл {tls_file}")
+            print("  Скачайте его вручную или выберите другой сценарий")
+            return False
+    
+    if missing:
+        error_msg = "Отсутствуют необходимые файлы: " + ", ".join(missing)
+        print(f"  ✗ {error_msg}")
+        log_error(error_msg)
+        return False
+    
+    kill_existing_process()
+    
+    bin_path = os.path.join("bin", "")
+    lists_path = os.path.join("lists", "")
+    
+    args = ["bin\\winws.exe"]
+    for arg in scenario['args']:
+        formatted_arg = arg.format(
+            BIN=bin_path,
+            LISTS=lists_path,
+            GAME_FILTER="0"
+        )
+        args.append(formatted_arg)
+    
+    try:
+        clear_screen()
+        
+        print(r"█▄░█ █▀▀ █░█░█ ▀█ ▄▀█ █▀█ █▀█ █▀▀ ▀█▀")
+        print(r"█░▀█ ██▄ ▀▄▀▄▀ █▄ █▀█ █▀▀ █▀▄ ██▄ ░█░")
+        print(f"\nСЦЕНАРИЙ: {scenario['name']}")
+        print("\nДля завершения работы нажмите любую клавишу...")
+        
+        process = subprocess.Popen(
+            args,
+            cwd=os.getcwd(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8',
+            errors='replace'
+        )
+        
+        def check_key_press():
+            while True:
+                if msvcrt.kbhit():
+                    key = msvcrt.getch()
+                    if key:
+                        process.terminate()
+                        return
+                time.sleep(0.1)
+        
+        key_thread = threading.Thread(target=check_key_press, daemon=True)
+        key_thread.start()
+        
+        while True:
+            try:
+                output = process.stdout.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                if output:
+                    print(output.strip())
+            except UnicodeDecodeError:
+                continue
+        
+        return True
+        
+    except Exception as e:
+        error_msg = f"Ошибка запуска: {type(e).__name__}"
+        print(f"  ✗ {error_msg}")
+        log_error(error_msg, e)
+        return False
+
+# ================================================
+# ГЛАВНЫЙ СКРИПТ
+# ================================================
+def main():
+    try:
+        setup_logging()
+        update_window_title()
+        
+        if not is_admin():
+            print("Требуются права администратора...")
+            time.sleep(1)
+            run_as_admin()
+            return
+        
+        print_banner()
+        
+        if not download_newzapret_files():
+            print("\n  ⚠ Не все файлы обновлены, работа продолжается")
+        
+        print("\nВыполняю оптимизацию сети...")
+        optimize_network()
+        
+        print("\nВыберите метод выбора сценария:")
+        print("1. Автоматический подбор (рекомендуется)")
+        print("2. Ручной выбор")
+        
+        while True:
+            choice = input("\nВведите номер варианта (1-2): ").strip()
+            if choice == "1":
+                best_scenario = auto_select_scenario()
+                if best_scenario:
+                    print(f"\nАвтоматически выбран сценарий: {best_scenario['name']}")
+                    run_newzapret(best_scenario)
+                else:
+                    print("Не удалось выбрать сценарий")
+                break
+            elif choice == "2":
+                scenario = select_scenario()
+                if scenario:
+                    run_newzapret(scenario)
+                else:
+                    print("Не удалось выбрать сценарий")
+                break
+            else:
+                print("Неверный выбор. Пожалуйста, введите 1 или 2.")
+        
+    except Exception as e:
+        error_msg = "Критическая ошибка выполнения"
+        print(f"  ✗ {error_msg}")
+        log_error(error_msg, e)
+        print("\nПодробности в лог-файле")
+
+if __name__ == "__main__":
+    main()
