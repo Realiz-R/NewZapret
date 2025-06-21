@@ -30,7 +30,12 @@ BIN_FILES = {
     "tls_clienthello_www_google_com.bin": "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/bin/tls_clienthello_www_google_com.bin"
 }
 
-REQUIRED_FILES = list(BIN_FILES.keys())
+LIST_FILES = {
+    "ipset-all.txt": "https://raw.githubusercontent.com/Realiz-R/NewZapret/main/lists/ipset-all.txt",
+    "list-general.txt": "https://raw.githubusercontent.com/Realiz-R/NewZapret/main/lists/list-general.txt"
+}
+
+REQUIRED_FILES = list(BIN_FILES.keys()) + list(LIST_FILES.keys())
 LOG_FILE = "logs/log.txt"
 TEST_URLS = [
     "https://discord.com",
@@ -346,10 +351,10 @@ SCENARIOS = [
             "--ipset={LISTS}ipset-all.txt",
             "--dpi-desync=fake",
             "--dpi-desync-autottl=2",
-            "--dpi-desync-repeats=10",
+            "--dpi-desync-repeats=12",
             "--dpi-desync-any-protocol=1",
             "--dpi-desync-fake-unknown-udp={BIN}quic_initial_www_google_com.bin",
-            "--dpi-desync-cutoff=n2"
+            "--dpi-desync-cutoff=n3"
         ],
         "requires_tls": True
     },
@@ -1049,8 +1054,8 @@ def log_error(message, exception=None):
         f.write(f"\n[ОШИБКА] {datetime.datetime.now()}\n")
         f.write(f"Сообщение: {message}\n")
         if exception:
-            f.write(f"Исключение: {str(exception)}\n")
-            f.write(f"Трассировка:\n{traceback.format_exc()}\n")
+            f.write(f"Тип ошибки: {type(exception).__name__}\n")
+            f.write(f"Подробности: {str(exception)}\n")
         f.write("-"*50 + "\n")
 
 def is_admin():
@@ -1142,9 +1147,20 @@ def download_nozaprets_files():
     success_count = 0
     total_files = len(REQUIRED_FILES)
     
-    for i, filename in enumerate(REQUIRED_FILES, 1):
+    # Сначала загружаем бинарные файлы
+    for i, filename in enumerate(REQUIRED_FILES[:len(BIN_FILES)], 1):
         dest_path = os.path.join("bin", filename)
         raw_url = BIN_FILES[filename]
+        
+        print(f"[{i}/{total_files}] Обработка {filename}...", end=' ')
+        
+        if download_file(raw_url, dest_path):
+            success_count += 1
+    
+    # Затем загружаем файлы списков
+    for i, filename in enumerate(REQUIRED_FILES[len(BIN_FILES):], len(BIN_FILES) + 1):
+        dest_path = os.path.join("lists", filename)
+        raw_url = LIST_FILES[filename]
         
         print(f"[{i}/{total_files}] Обработка {filename}...", end=' ')
         
@@ -1333,7 +1349,7 @@ def run_nozaprets(scenario):
     
     missing = []
     for filename in REQUIRED_FILES:
-        if not os.path.exists(os.path.join("bin", filename)):
+        if not os.path.exists(os.path.join("bin" if filename in BIN_FILES else "lists", filename)):
             missing.append(filename)
     
     if scenario.get('requires_tls', False):
@@ -1371,7 +1387,7 @@ def run_nozaprets(scenario):
         print(r"█▄░█ █▀▀ █░█░█ ▀█ ▄▀█ █▀█ █▀█ █▀▀ ▀█▀")
         print(r"█░▀█ ██▄ ▀▄▀▄▀ █▄ █▀█ █▀▀ █▀▄ ██▄ ░█░")
         print(f"\nСЦЕНАРИЙ: {scenario['name']}")
-        print("\nДля завершения работы нажмите любую клавишу\n")
+        print("\nДля завершения работы нажмите любую клавишу...")
         
         process = subprocess.Popen(
             args,
@@ -1396,11 +1412,14 @@ def run_nozaprets(scenario):
         key_thread.start()
         
         while True:
-            output = process.stdout.readline()
-            if output == '' and process.poll() is not None:
-                break
-            if output:
-                print(output.strip())
+            try:
+                output = process.stdout.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                if output:
+                    print(output.strip())
+            except UnicodeDecodeError:
+                continue
         
         return True
         
