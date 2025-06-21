@@ -1,0 +1,1 @@
+TextOptimizer ipset-all.txt --remove-empty --trim

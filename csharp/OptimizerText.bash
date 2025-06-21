@@ -1,0 +1,1 @@
+TextOptimizer list-general.txt --minify --remove-empty --deduplicate --normalize
