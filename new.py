@@ -35,9 +35,9 @@ BIN_FILES = {
 }
 
 LIST_FILES = {
-    "ipset-all.txt": "https://raw.githubusercontent.com/Realiz-R/NewZapret/main/lists/ipset-all.txt",
-    "list-general.txt": "https://raw.githubusercontent.com/Realiz-R/NewZapret/main/lists/list-general.txt",
-    "scenarios.json": "https://raw.githubusercontent.com/Realiz-R/NewZapret/main/lists/scenarios.json"
+    "ipset-all.txt": "https://raw.githubusercontent.com/Realiz-R/NewZapret/refs/heads/main/lists/ipset-all.txt",
+    "list-general.txt": "https://raw.githubusercontent.com/Realiz-R/NewZapret/refs/heads/main/lists/list-general.txt",
+    "scenarios.json": "https://raw.githubusercontent.com/Realiz-R/NewZapret/refs/heads/main/lists/scenarios.json"
 }
 
 REQUIRED_FILES = list(BIN_FILES.keys()) + list(LIST_FILES.keys())
