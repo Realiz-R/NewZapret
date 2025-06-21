@@ -11,10 +11,13 @@ import msvcrt
 import json
 import urllib3
 from urllib.parse import unquote, urlparse
+from itertools import zip_longest
+from math import ceil
+import signal
 
 # Установка титула командной строки
 if os.name == 'nt':
-    ctypes.windll.kernel32.SetConsoleTitleW("NewZapret | 1.1 | Название обхода: Ожидание... | by Realiz_")
+    ctypes.windll.kernel32.SetConsoleTitleW("NewZapret | 1.2 | Название обхода: Ожидание... | by Realiz_")
 
 # Отключение предупреждений о неверифицированных SSL-сертификатах
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -56,10 +59,10 @@ TEST_ITERATIONS = 2
 def setup_logging():
     os.makedirs("logs", exist_ok=True)
     with open(LOG_FILE, "w", encoding="utf-8") as f:
-        f.write(f"=== NewZapret log v1.1 - {datetime.datetime.now()} ===\n")
+        f.write(f"=== NewZapret log v1.2 - {datetime.datetime.now()} ===\n")
 
 def update_window_title(scenario_name=None):
-    title = f"NewZapret | 1.1 | Название обхода: {scenario_name if scenario_name else 'Ожидание...'} | by Realiz_"
+    title = f"NewZapret | 1.2 | Название обхода: {scenario_name if scenario_name else 'Ожидание...'} | by Realiz_"
     if os.name == 'nt':
         ctypes.windll.kernel32.SetConsoleTitleW(title)
 
@@ -70,6 +73,7 @@ def log_error(message, exception=None):
         if exception:
             f.write(f"Тип ошибки: {type(exception).__name__}\n")
             f.write(f"Подробности: {str(exception)}\n")
+            f.write(f"Трассировка:\n{traceback.format_exc()}\n")
         f.write("-"*50 + "\n")
 
 def is_admin():
@@ -98,7 +102,7 @@ def print_banner():
 █▄░█ █▀▀ █░█░█ ▀█ ▄▀█ █▀█ █▀█ █▀▀ ▀█▀
 █░▀█ ██▄ ▀▄▀▄▀ █▄ █▀█ █▀▀ █▀▄ ██▄ ░█░
 
-АВТОМАТИЧЕСКИЙ ОБХОД DPI | ВЕРСИЯ 1.1 | by Realiz_
+АВТОМАТИЧЕСКИЙ ОБХОД DPI | ВЕРСИЯ 1.2 | by Realiz_
 """
     print(banner)
     print(f"{'='*60}\n")
@@ -286,11 +290,14 @@ def test_scenario(scenario):
             results.append(min(url_times))
     
     finally:
-        process.terminate()
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        except:
+            pass
     
     return sum(results) / len(results) if results else TEST_TIMEOUT
 
@@ -318,6 +325,7 @@ def auto_select_scenario():
     
     results.sort(key=lambda x: x[1])
     
+    os.makedirs("logs", exist_ok=True)
     with open("logs/test_results.json", "w", encoding="utf-8") as f:
         json.dump([
             {"scenario": s["name"], "time": t} 
@@ -330,24 +338,53 @@ def auto_select_scenario():
     
     return results[0][0]
 
+def display_scenarios(scenarios):
+    """Отображение сценариев в два столбца с выравниванием"""
+    if not scenarios:
+        print("Нет доступных сценариев")
+        return None
+
+    # Разделяем на две колонки
+    half = ceil(len(scenarios) / 2)
+    col1 = scenarios[:half]
+    col2 = scenarios[half:]
+    
+    # Определяем максимальную длину для выравнивания
+    max_name_len = max(len(s['name']) for s in col1) + 2
+    max_id_len = len(str(max(s['id'] for s in scenarios))) + 1
+    
+    print("\n" + "="*60)
+    print("{:^60}".format("ДОСТУПНЫЕ СЦЕНАРИИ ОБХОДА"))
+    print("="*60 + "\n")
+    
+    # Выводим построчно два столбца
+    for left, right in zip_longest(col1, col2, fillvalue=None):
+        # Левый столбец
+        left_str = f"{left['id']:{max_id_len}}. {left['name']:{max_name_len}}" if left else " "*(max_id_len + max_name_len + 2)
+        
+        # Правый столбец
+        right_str = f"{right['id']:{max_id_len}}. {right['name']}" if right else ""
+        
+        print(left_str + "   " + right_str)
+    
+    print("\n" + "="*60)
+    print("0. Вернуться назад\n")
+
 def select_scenario():
     scenarios = load_scenarios()
     if not scenarios:
         print("Не удалось загрузить сценарии. Использую встроенные.")
         return None
     
-    print("\n[3/3] Выбор сценария обхода\n")
-    print("Доступные сценарии:")
-    
-    for scenario in scenarios:
-        print(f"\n{scenario['id']}. {scenario['name']}")
-        print(f"   {scenario['description']}")
-    
-    print("\n" + "="*60)
-    
     while True:
+        display_scenarios(scenarios)
+        
         try:
-            choice = int(input("\nВведите номер сценария: "))
+            choice = input("Введите номер сценария: ").strip()
+            if choice == "0":
+                return None
+                
+            choice = int(choice)
             for scenario in scenarios:
                 if scenario['id'] == choice:
                     return scenario
@@ -434,7 +471,9 @@ def run_newzapret(scenario):
             stderr=subprocess.STDOUT,
             text=True,
             encoding='utf-8',
-            errors='replace'
+            errors='replace',
+            bufsize=1,
+            universal_newlines=True
         )
         
         def check_key_press():
@@ -442,22 +481,31 @@ def run_newzapret(scenario):
                 if msvcrt.kbhit():
                     key = msvcrt.getch()
                     if key:
-                        process.terminate()
+                        try:
+                            process.terminate()
+                        except:
+                            pass
                         return
                 time.sleep(0.1)
         
         key_thread = threading.Thread(target=check_key_press, daemon=True)
         key_thread.start()
         
-        while True:
+        def signal_handler(sig, frame):
             try:
-                output = process.stdout.readline()
-                if output == '' and process.poll() is not None:
-                    break
-                if output:
-                    print(output.strip())
-            except UnicodeDecodeError:
-                continue
+                process.terminate()
+            except:
+                pass
+            sys.exit(0)
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        
+        while True:
+            output = process.stdout.readline()
+            if output == '' and process.poll() is not None:
+                break
+            if output:
+                print(output.strip())
         
         return True
         
@@ -489,35 +537,40 @@ def main():
         print("\nВыполняю оптимизацию сети...")
         optimize_network()
         
-        print("\nВыберите метод выбора сценария:")
-        print("1. Автоматический подбор (рекомендуется)")
-        print("2. Ручной выбор")
-        
         while True:
-            choice = input("\nВведите номер варианта (1-2): ").strip()
-            if choice == "1":
+            print("\nВыберите метод выбора сценария:")
+            print("1. Автоматический подбор (рекомендуется)")
+            print("2. Ручной выбор")
+            print("0. Выход")
+            
+            choice = input("\nВаш выбор (0-2): ").strip()
+            
+            if choice == "0":
+                print("\nЗавершение работы...")
+                break
+            elif choice == "1":
                 best_scenario = auto_select_scenario()
                 if best_scenario:
                     print(f"\nАвтоматически выбран сценарий: {best_scenario['name']}")
                     run_newzapret(best_scenario)
                 else:
                     print("Не удалось выбрать сценарий")
-                break
             elif choice == "2":
                 scenario = select_scenario()
                 if scenario:
                     run_newzapret(scenario)
-                else:
-                    print("Не удалось выбрать сценарий")
-                break
             else:
-                print("Неверный выбор. Пожалуйста, введите 1 или 2.")
+                print("Неверный выбор. Пожалуйста, введите 0, 1 или 2.")
         
+    except KeyboardInterrupt:
+        print("\nЗавершение работы по запросу пользователя...")
     except Exception as e:
         error_msg = "Критическая ошибка выполнения"
         print(f"  ✗ {error_msg}")
         log_error(error_msg, e)
         print("\nПодробности в лог-файле")
+    finally:
+        kill_existing_process()
 
 if __name__ == "__main__":
     main()
