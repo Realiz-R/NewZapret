@@ -14,10 +14,11 @@ from urllib.parse import unquote, urlparse
 from itertools import zip_longest
 from math import ceil
 import signal
+from tqdm import tqdm  # Для прогресс-баров
 
 # Установка титула командной строки
 if os.name == 'nt':
-    ctypes.windll.kernel32.SetConsoleTitleW("NewZapret | 1.2 | Название обхода: Ожидание... | by Realiz_")
+    ctypes.windll.kernel32.SetConsoleTitleW("NewZapret | 1.3 | Название обхода: Ожидание... | by Realiz_")
 
 # Отключение предупреждений о неверифицированных SSL-сертификатах
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -53,16 +54,181 @@ TEST_URLS = [
 TEST_TIMEOUT = 10
 TEST_ITERATIONS = 2
 
+class ZapretStatus:
+    def __init__(self):
+        self.reset()
+        self.current_scenario = "Ожидание..."
+        
+    def reset(self):
+        self.version = ""
+        self.profiles = 0
+        self.hostlist = {
+            'filename': "",
+            'current': 0,
+            'updates': [],
+            'errors': []
+        }
+        self.ipset = {
+            'filename': "",
+            'current': 0,
+            'updates': [],
+            'errors': []
+        }
+        self.status = "Инициализация"
+        self.last_update = datetime.datetime.now()
+        self.message_queue = []
+
+    def set_scenario(self, scenario_name):
+        self.current_scenario = scenario_name
+        if os.name == 'nt':
+            ctypes.windll.kernel32.SetConsoleTitleW(f"NewZapret | 1.3 | Название обхода: {scenario_name} | by Realiz_")
+
+    def parse_line(self, line):
+        line = line.strip()
+        if not line:
+            return
+
+        now = datetime.datetime.now()
+        
+        # Обработка версии
+        if line.startswith('self-built version'):
+            self.version = line.replace('self-built version', '').strip()
+            self.add_message(f"Обнаружена версия: {self.version}", now)
+            return
+            
+        # Обработка профилей
+        if 'user defined desync profile' in line:
+            parts = line.split()
+            self.profiles = int(parts[2])
+            self.add_message(f"Загружено профилей: {self.profiles} пользовательских + 1 по умолчанию", now)
+            return
+            
+        # Обработка hostlist
+        if line.startswith('Loading hostlist'):
+            filename = line.split()[-1]
+            if not self.hostlist['filename']:
+                self.hostlist['filename'] = filename
+            self.add_message(f"Начало загрузки доменов из {filename}", now)
+            return
+            
+        if line == 'loading plain text list':
+            return  # Пропускаем технические строки
+            
+        if line.startswith('Loaded') and 'hosts from' in line:
+            count = int(line.split()[1])
+            self.hostlist['current'] = count
+            self.hostlist['updates'].append((now, count))
+            self.add_message(f"Загружено доменов: {count}", now)
+            return
+            
+        # Обработка ipset
+        if line.startswith('Loading ipset'):
+            filename = line.split()[-1]
+            if not self.ipset['filename']:
+                self.ipset['filename'] = filename
+            self.add_message(f"Начало загрузки IP-адресов из {filename}", now)
+            return
+            
+        if 'bad ip or subnet' in line:
+            error_line = line.split(':')[-1].strip()
+            self.ipset['errors'].append((now, error_line))
+            self.add_message(f"Ошибка в строке {error_line}", now, is_error=True)
+            return
+            
+        if line.startswith('Loaded') and 'ip/subnets from' in line:
+            count = int(line.split()[1])
+            self.ipset['current'] = count
+            self.ipset['updates'].append((now, count))
+            self.add_message(f"Загружено IP/подсетей: {count}", now)
+            return
+            
+        # Обработка статуса
+        if 'windivert initialized' in line:
+            self.status = "Активен"
+            self.add_message("Система успешно запущена", now)
+            return
+
+    def add_message(self, text, timestamp, is_error=False):
+        self.message_queue.append({
+            'time': timestamp,
+            'text': text,
+            'error': is_error
+        })
+        # Держим очередь в разумных пределах
+        if len(self.message_queue) > 20:
+            self.message_queue.pop(0)
+
+    def get_status(self):
+        """Генерирует красивый статус для отображения"""
+        lines = []
+        
+        # Шапка
+        lines.append("╔══════════════════════════════════════════════════╗")
+        lines.append("║           СИСТЕМНЫЙ СТАТУС NEWZAPRET            ║")
+        lines.append("╚══════════════════════════════════════════════════╝")
+        lines.append("")
+        
+        # Основная информация
+        lines.append(f"▪ Версия: 1.3 | Сценарий: {self.current_scenario}")
+        
+        if self.version:
+            lines.append(f"▪ Версия ядра: {self.version}")
+        
+        if self.profiles > 0:
+            lines.append(f"▪ Профили обхода: {self.profiles} пользовательских + 1 стандартный")
+        
+        lines.append(f"▪ Статус: {self.status}")
+        lines.append(f"▪ Последнее обновление: {self.last_update.strftime('%H:%M:%S')}")
+        lines.append("")
+        
+        # Секция доменов
+        hl = self.hostlist
+        status_icon = "✔" if not hl['errors'] else "⚠"
+        lines.append(f"{status_icon} СПИСОК ДОМЕНОВ: {hl['filename']}")
+        lines.append(f"  ▸ Текущее количество: {hl['current']}")
+        
+        if hl['updates']:
+            lines.append("  ▸ История изменений:")
+            for ts, count in hl['updates'][-3:]:
+                lines.append(f"    - [{ts.strftime('%H:%M:%S')}] {count} доменов")
+        lines.append("")
+        
+        # Секция IP-адресов
+        ips = self.ipset
+        status_icon = "✔" if not ips['errors'] else "⚠"
+        lines.append(f"{status_icon} СПИСОК IP-АДРЕСОВ: {ips['filename']}")
+        lines.append(f"  ▸ Текущее количество: {ips['current']}")
+        
+        if ips['errors']:
+            lines.append("  ▸ Последние ошибки:")
+            for ts, err in ips['errors'][-2:]:
+                lines.append(f"    - [{ts.strftime('%H:%M:%S')}] Ошибка в строке {err}")
+        
+        if ips['updates']:
+            lines.append("  ▸ История изменений:")
+            for ts, count in ips['updates'][-3:]:
+                lines.append(f"    - [{ts.strftime('%H:%M:%S')}] {count} IP/подсетей")
+        lines.append("")
+        
+        # Последние сообщения
+        lines.append("═" * 60)
+        lines.append("ПОСЛЕДНИЕ СОБЫТИЯ:")
+        for msg in self.message_queue[-5:]:
+            prefix = "⚠" if msg['error'] else "▪"
+            lines.append(f"{prefix} [{msg['time'].strftime('%H:%M:%S')}] {msg['text']}")
+        
+        return "\n".join(lines)
+
 # ================================================
 # СИСТЕМНЫЕ УТИЛИТЫ
 # ================================================
 def setup_logging():
     os.makedirs("logs", exist_ok=True)
     with open(LOG_FILE, "w", encoding="utf-8") as f:
-        f.write(f"=== NewZapret log v1.2 - {datetime.datetime.now()} ===\n")
+        f.write(f"=== NewZapret log v1.3 - {datetime.datetime.now()} ===\n")
 
 def update_window_title(scenario_name=None):
-    title = f"NewZapret | 1.2 | Название обхода: {scenario_name if scenario_name else 'Ожидание...'} | by Realiz_"
+    title = f"NewZapret | 1.3 | Название обхода: {scenario_name if scenario_name else 'Ожидание...'} | by Realiz_"
     if os.name == 'nt':
         ctypes.windll.kernel32.SetConsoleTitleW(title)
 
@@ -102,7 +268,7 @@ def print_banner():
 █▄░█ █▀▀ █░█░█ ▀█ ▄▀█ █▀█ █▀█ █▀▀ ▀█▀
 █░▀█ ██▄ ▀▄▀▄▀ █▄ █▀█ █▀▀ █▀▄ ██▄ ░█░
 
-АВТОМАТИЧЕСКИЙ ОБХОД DPI | ВЕРСИЯ 1.2 | by Realiz_
+АВТОМАТИЧЕСКИЙ ОБХОД DPI | ВЕРСИЯ 1.3 | by Realiz_
 """
     print(banner)
     print(f"{'='*60}\n")
@@ -120,7 +286,7 @@ def load_scenarios():
         return None
 
 # ================================================
-# УЛУЧШЕННАЯ ЗАГРУЗКА ФАЙЛОВ
+# УЛУЧШЕННАЯ ЗАГРУЗКА ФАЙЛОВ С ПРОГРЕСС-БАРОМ
 # ================================================
 def download_file(url, dest_path):
     try:
@@ -128,34 +294,42 @@ def download_file(url, dest_path):
         response = requests.get(url, stream=True, timeout=15, verify=False)
         response.raise_for_status()
         
+        total_size = int(response.headers.get('content-length', 0))
         file_exists = os.path.exists(dest_path)
+        
         if file_exists:
             try:
                 existing_size = os.path.getsize(dest_path)
+                if existing_size == total_size:
+                    print(f"  ✓ Актуальная версия ({total_size//1024} КБ)")
+                    return True
             except OSError:
                 existing_size = 0
-        else:
-            existing_size = 0
-            
-        new_size = int(response.headers.get('content-length', 0))
         
-        if file_exists and existing_size == new_size:
-            print(f"  ✓ Актуальная версия ({new_size//1024} КБ)")
-            return True
+        progress_bar = tqdm(
+            total=total_size, 
+            unit='B', 
+            unit_scale=True,
+            desc=f"Загрузка {os.path.basename(dest_path)}",
+            leave=False
+        )
         
         with open(temp_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
+                    progress_bar.update(len(chunk))
+        
+        progress_bar.close()
         
         if file_exists:
             os.remove(dest_path)
         os.rename(temp_path, dest_path)
         
         if file_exists:
-            print(f"  ✓ Обновлен ({new_size//1024} КБ)")
+            print(f"  ✓ Обновлен ({total_size//1024} КБ)")
         else:
-            print(f"  ✓ Загружен ({new_size//1024} КБ)")
+            print(f"  ✓ Загружен ({total_size//1024} КБ)")
         
         return True
         
@@ -313,15 +487,18 @@ def auto_select_scenario():
     
     results = []
     
-    for scenario in scenarios:
-        try:
-            print(f"Тестирование: {scenario['name']}...")
-            avg_time = test_scenario(scenario)
-            results.append((scenario, avg_time))
-            print(f"  ✓ Среднее время: {avg_time:.2f} сек")
-        except Exception as e:
-            log_error(f"Ошибка тестирования сценария {scenario['name']}", e)
-            results.append((scenario, TEST_TIMEOUT * 2))
+    with tqdm(total=len(scenarios)*len(TEST_URLS)*TEST_ITERATIONS, desc="Тестирование сценариев") as pbar:
+        for scenario in scenarios:
+            try:
+                print(f"Тестирование: {scenario['name']}")
+                avg_time = test_scenario(scenario)
+                results.append((scenario, avg_time))
+                pbar.update(len(TEST_URLS)*TEST_ITERATIONS)
+                print(f"  ✓ Среднее время: {avg_time:.2f} сек")
+            except Exception as e:
+                log_error(f"Ошибка тестирования сценария {scenario['name']}", e)
+                results.append((scenario, TEST_TIMEOUT * 2))
+                pbar.update(len(TEST_URLS)*TEST_ITERATIONS)
     
     results.sort(key=lambda x: x[1])
     
@@ -476,6 +653,10 @@ def run_newzapret(scenario):
             universal_newlines=True
         )
         
+        # Инициализация системы мониторинга
+        zapret_status = ZapretStatus()
+        zapret_status.set_scenario(scenario['name'])
+        
         def check_key_press():
             while True:
                 if msvcrt.kbhit():
@@ -505,7 +686,10 @@ def run_newzapret(scenario):
             if output == '' and process.poll() is not None:
                 break
             if output:
-                print(output.strip())
+                zapret_status.parse_line(output)
+                clear_screen()
+                print(zapret_status.get_status())
+                print("\nДля завершения работы нажмите любую клавишу...")
         
         return True
         
