@@ -917,7 +917,7 @@
             "--desync-autottl=3",
             "--desync-repeats=12",
             "--desync-any-protocol=1",
-            "--desync-fake-unknown-udp={BIN}quic_initial_www_google_com.bin",
+            "--desync-fake-quic={BIN}quic_initial_www_google_com.bin",
             "--desync-cutoff=n3"
         ],
         "requires_tls": true
