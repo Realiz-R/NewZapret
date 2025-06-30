@@ -20,7 +20,7 @@ from packaging import version
 
 # Установка титула командной строки
 if os.name == 'nt':
-    ctypes.windll.kernel32.SetConsoleTitleW("NewZapret | 2.0 | Название обхода: Ожидание... | by Realiz_")
+    ctypes.windll.kernel32.SetConsoleTitleW("NewZapret | 1.4 | Название обхода: Ожидание... | by Realiz_")
 
 # Отключение предупреждений о неверифицированных SSL-сертификатах
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -31,7 +31,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 REPO_URL = "https://github.com/bol-van/zapret-win-bundle"
 REPO_RAW_URL = "https://raw.githubusercontent.com/bol-van/zapret-win-bundle/master"
 UPDATE_REPO = "Realiz-R/NewZapret"
-CURRENT_VERSION = "2.0"
+CURRENT_VERSION = "1.4"
 
 BIN_FILES = {
     "WinDivert.dll": f"{REPO_RAW_URL}/zapret-winws/WinDivert.dll",
@@ -85,7 +85,7 @@ class ZapretStatus:
     def set_scenario(self, scenario_name):
         self.current_scenario = scenario_name
         if os.name == 'nt':
-            ctypes.windll.kernel32.SetConsoleTitleW(f"NewZapret | 2.0 | Название обхода: {scenario_name} | by Realiz_")
+            ctypes.windll.kernel32.SetConsoleTitleW(f"NewZapret | 1.4 | Название обхода: {scenario_name} | by Realiz_")
 
     def parse_line(self, line):
         line = line.strip()
@@ -162,7 +162,7 @@ class ZapretStatus:
         lines.append("║           СИСТЕМНЫЙ СТАТУС NEWZAPRET            ║")
         lines.append("╚══════════════════════════════════════════════════╝")
         lines.append("")
-        lines.append(f"▪ Версия: 2.0 | Сценарий: {self.current_scenario}")
+        lines.append(f"▪ Версия: 1.4 | Сценарий: {self.current_scenario}")
         
         if self.version:
             lines.append(f"▪ Версия ядра: {self.version}")
@@ -212,10 +212,10 @@ class ZapretStatus:
 def setup_logging():
     os.makedirs("logs", exist_ok=True)
     with open(LOG_FILE, "w", encoding="utf-8") as f:
-        f.write(f"=== NewZapret log v2.0 - {datetime.datetime.now()} ===\n")
+        f.write(f"=== NewZapret log v1.4 - {datetime.datetime.now()} ===\n")
 
 def update_window_title(scenario_name=None):
-    title = f"NewZapret | 2.0 | Название обхода: {scenario_name if scenario_name else 'Ожидание...'} | by Realiz_"
+    title = f"NewZapret | 1.4 | Название обхода: {scenario_name if scenario_name else 'Ожидание...'} | by Realiz_"
     if os.name == 'nt':
         ctypes.windll.kernel32.SetConsoleTitleW(title)
 
@@ -255,7 +255,7 @@ def print_banner():
 █▄░█ █▀▀ █░█░█ ▀█ ▄▀█ █▀█ █▀█ █▀▀ ▀█▀
 █░▀█ ██▄ ▀▄▀▄▀ █▄ █▀█ █▀▀ █▀▄ ██▄ ░█░
 
-АВТОМАТИЧЕСКИЙ ОБХОД DPI | ВЕРСИЯ 2.0 | by Realiz_
+АВТОМАТИЧЕСКИЙ ОБХОД DPI | ВЕРСИЯ 1.4 | by Realiz_
 """
     print(banner)
     print(f"{'='*60}\n")
